@@ -1,5 +1,7 @@
-import "./style.css";
+import { ClientRouter } from './ClientRouter';
+import './style.css';
 
-const app = document.querySelector<HTMLDivElement>("#app")!;
+const appEl = document.querySelector<HTMLDivElement>('#app');
+if (!appEl) throw new Error('Base app element (#app) not found.');
 
-app.innerText = "works";
+new ClientRouter(appEl);

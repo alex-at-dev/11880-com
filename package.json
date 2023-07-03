@@ -6,14 +6,15 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "pretty": "prettier --w ./src",
+    "lint": "eslint ./src/**/*.ts"
   },
   "devDependencies": {
-    "eslint-plugin-prettier": "^4.2.1",
+    "@typescript-eslint/eslint-plugin": "^5.60.1",
+    "eslint": "^8.44.0",
+    "eslint-config-prettier": "^8.8.0",
     "typescript": "^5.0.2",
     "vite": "^4.3.9"
-  },
-  "dependencies": {
-    "eslint": "^8.44.0"
   }
 }
