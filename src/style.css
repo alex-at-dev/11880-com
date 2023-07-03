@@ -1,0 +1,14 @@
+:root {
+  font: 400 16px/1.5 "Helvetica Neue", "Helvetica", sans-serif;
+
+  color: #222;
+  background: white;
+}
+
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 100vh;
+}
