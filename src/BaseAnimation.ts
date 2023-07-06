@@ -1,5 +1,6 @@
 export class BaseAnimation {
   container: HTMLElement;
+
   constructor(container: HTMLElement) {
     this.container = container;
   }

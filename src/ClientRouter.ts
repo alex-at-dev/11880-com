@@ -1,17 +1,21 @@
-import { BaseAnimation } from './BaseAnimation';
-import { ConnectedDotsAnimation } from './ConnectedDotsAnimation';
+export type RouteConfig = Record<
+  string,
+  (navigate: typeof ClientRouter.prototype.navigate) => (() => void) | void
+>;
 
 export class ClientRouter {
   container: HTMLElement;
-  currentAnimation: BaseAnimation | null = null;
+  routeConfig: RouteConfig;
+  destroyCurrentRoute: (() => void) | null = null;
 
-  constructor(container: HTMLElement) {
+  constructor(container: HTMLElement, routeConfig: RouteConfig) {
     this.container = container;
+    this.routeConfig = routeConfig;
 
     // add click listener to all anchor elements
     document
       .querySelectorAll('a')
-      .forEach((el) => el.addEventListener('click', this.handleAnchorClick));
+      .forEach((el) => el.addEventListener('click', this.handleAnchorClick.bind(this)));
 
     // initial navigation
     window.addEventListener('load', () => this.navigate(location.pathname, true));
@@ -20,27 +24,22 @@ export class ClientRouter {
   handleAnchorClick(ev: MouseEvent) {
     ev.preventDefault();
     const target = ev.target as HTMLAnchorElement;
+
+    document.querySelectorAll('a').forEach((el) => el.classList.remove('active'));
+    target.classList.add('active');
+
     this.navigate(target.href);
   }
 
   navigate(url: string, force = false) {
-    if (!force && location.pathname === url) return;
+    const urlData = new URL(url, location.href);
+    if (!force && location.href === urlData.href) return;
     history.pushState({}, '', url);
 
-    if (this.currentAnimation) this.currentAnimation.destroy();
-    switch (url) {
-      case '/connected-dots':
-        this._initAnim(ConnectedDotsAnimation);
-        break;
-      default:
-        this.currentAnimation = null;
-        this.container.innerText = `No animation for route "${url}" found.`;
-        break;
-    }
-  }
-
-  _initAnim(Cls: typeof BaseAnimation) {
-    this.currentAnimation = new Cls(this.container);
-    this.currentAnimation.start();
+    if (this.destroyCurrentRoute) this.destroyCurrentRoute();
+    const currConfig = this.routeConfig[urlData.pathname];
+    if (!currConfig) this.container.innerText = `No route found for "${urlData.href}".`;
+    const destroy = currConfig(this.navigate.bind(this));
+    this.destroyCurrentRoute = destroy ?? null;
   }
 }
