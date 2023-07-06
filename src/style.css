@@ -14,10 +14,6 @@ body {
   min-height: 100vh;
 }
 
-canvas {
-  border: 2px solid #333;
-}
-
 header {
   display: flex;
   margin: 1rem 0;

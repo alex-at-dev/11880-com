@@ -1,18 +1,20 @@
 import { BaseAnimation } from './BaseAnimation';
 import { Color } from './types/Color';
+import { DotTarget } from './types/DotTarget';
 import { Point } from './types/Point';
 import { getColorDiff } from './util/getColorDiff';
+import { randrangeGauss } from './util/randrangeGauss';
 
-const WIDTH = 400;
-const HEIGHT = 400;
+const WIDTH = 600;
+const HEIGHT = 600;
 
 const COL_TOP: Color = { r: 206, g: 254, b: 66, a: 1 }; // dot color for y=0
 const COL_BOTTOM: Color = { r: 0, g: 194, b: 255, a: 1 }; // dot color for y=HEIGHT
 const _COL_DELTA = getColorDiff(COL_TOP, COL_BOTTOM);
 
 const DOT_R = 4; // dot radius
-const DOT_GAP = 16; // gap between dots
-const DOT_A = 0.08; // dot acceleration
+const DOT_GAP = 14; // gap between dots
+const DOT_A = 0.09; // dot acceleration
 
 // image elements by source. NOTE: this variable will be changed! (not reassigned, but filled with records)
 const imageCache: Record<string, HTMLImageElement> = {};
@@ -74,22 +76,7 @@ export class DotShapeAnimation extends BaseAnimation {
     await this._drawImage(url);
 
     this._createPointsFromShapeCanvas();
-    this._createDotsFromPoints();
-  }
-
-  /**
-   * Pushes all dots to the outer screen bound
-   */
-  _explodeDots() {
-    const center: Point = { x: WIDTH / 2, y: HEIGHT / 2 };
-    const canvasHypot = Math.sqrt(((WIDTH / 2) * WIDTH) / 2 + ((HEIGHT / 2) * HEIGHT) / 2);
-    for (let i = 0; i < this.dots.length; i++) {
-      const dot = this.dots[i];
-      const { dx, dy, d } = dot.distanceTo(center);
-      const x = (dx / d) * canvasHypot + WIDTH / 2;
-      const y = (dy / d) * canvasHypot + HEIGHT / 2;
-      dot.target = { x, y };
-    }
+    this._updateDotsFromPoints();
   }
 
   async _drawImage(src: string) {
@@ -129,10 +116,6 @@ export class DotShapeAnimation extends BaseAnimation {
   _createPointsFromShapeCanvas() {
     let x = 0;
     let y = 0;
-    let w = 0;
-    let h = 0;
-    let xmin = WIDTH;
-    let ymin = HEIGHT;
     this.points = [];
     const pixels = this.shapeCx.getImageData(0, 0, WIDTH, HEIGHT).data;
 
@@ -141,11 +124,6 @@ export class DotShapeAnimation extends BaseAnimation {
     while (i < pixels.length) {
       if (pixels[i]) {
         this.points.push({ x, y });
-
-        if (x > w) w = x;
-        if (y > h) h = y;
-        if (x < xmin) xmin = x;
-        if (y < ymin) ymin = y;
       }
 
       x += DOT_GAP;
@@ -163,24 +141,29 @@ export class DotShapeAnimation extends BaseAnimation {
     }
   }
 
-  _createDotsFromPoints() {
+  _updateDotsFromPoints() {
+    // assign all positions for needed dots
     for (let i = 0; i < this.points.length; i++) {
       const p = this.points[i];
-      let d = this.dots[i];
-      if (!d) {
-        d = new Dot(WIDTH / 2, HEIGHT / 2);
-        this.dots.push(d);
+      let dot = this.dots[i];
+      if (!dot) {
+        dot = new Dot(WIDTH / 2, HEIGHT / 2);
+        this.dots.push(dot);
       }
-      d.isVisible = true;
-      d.target = p;
+      dot.queue.push({ x: randrangeGauss(WIDTH), y: randrangeGauss(HEIGHT), a: 1 });
+      dot.queue.push({ ...p, a: 1 });
     }
     if (this.dots.length <= this.points.length) return;
 
-    const center: Point = { x: WIDTH / 2, y: HEIGHT / 2 };
+    // assign random less visible positions to unneeded dots
     for (let i = this.points.length; i < this.dots.length; i++) {
       const dot = this.dots[i];
-      dot.target = center;
-      dot.isVisible = false;
+      const target = {
+        x: randrangeGauss(0, WIDTH, 2),
+        y: randrangeGauss(0, HEIGHT, 2),
+        a: 0.2,
+      };
+      dot.queue.push(target);
     }
   }
 
@@ -193,8 +176,8 @@ export class DotShapeAnimation extends BaseAnimation {
       if (this.dots[i].update()) dotsDirty = true;
     }
 
+    // -- render (if dirty)--
     if (dotsDirty) {
-      // -- render --
       // clear canvas
       this.cx.fillStyle = 'rgba(255,255,255,.9)';
       this.cx.fillRect(0, 0, WIDTH, HEIGHT);
@@ -216,45 +199,71 @@ class Dot {
   x: number;
   y: number;
   color: Color;
-  target: Point | null = null;
-  isVisible = true;
+  target: DotTarget | null = null;
+  queue: DotTarget[];
 
   constructor(x: number, y: number) {
     this.id = Dot._id++;
     this.x = x;
     this.y = y;
     this.color = { r: 0, g: 0, b: 0, a: 0 };
+    this.queue = [];
   }
 
+  /**
+   * Update function for one dot. Called every frame.
+   * @returns true if dot updated, false if not.
+   */
   update() {
-    if (!this.target) return false;
-
-    // move towards target
-    const { dx, dy, d } = this.distanceTo(this.target);
-    const v = DOT_A * d;
-    if (d > 1) {
-      this.x += (dx / d) * v;
-      this.y += (dy / d) * v;
-    } else {
-      this.target = null;
+    if (!this.target) {
+      if (!this.queue.length) return false;
+      this.target = this.queue.shift() as DotTarget;
     }
 
-    // update color
+    // update position and color
+    const didMove = this._moveTowardsTarget();
+    if (didMove) this._updateColor();
+    const didUpdateAlpha = this._updateAlpha();
+
+    // remove target if reached
+    const didUpdate = didMove || didUpdateAlpha;
+    if (!didUpdate) this.target = null;
+
+    return didUpdate;
+  }
+
+  /**
+   * Moves the dot towards {@link this.target} for one frame.
+   * @returns true if dot had to move, false if not (-> target is reached)
+   */
+  _moveTowardsTarget() {
+    if (!this.target) return false;
+    const { dx, dy, d } = this.distanceTo(this.target);
+    if (d <= 1.2) {
+      return false;
+    }
+
+    const v = DOT_A * d;
+    this.x += (dx / d) * v;
+    this.y += (dy / d) * v;
+    return true;
+  }
+
+  _updateColor() {
     const yRel = this.y / HEIGHT;
 
     this.color.r = COL_TOP.r + _COL_DELTA.r * yRel;
     this.color.g = COL_TOP.g + _COL_DELTA.g * yRel;
     this.color.b = COL_TOP.b + _COL_DELTA.b * yRel;
+  }
 
-    if (this.isVisible && this.color.a !== 1) {
-      if (this.color.a === 0) this.color.a = 0.01;
-      this.color.a *= 1.5;
-      if (this.color.a > 1) this.color.a = 1;
-    } else if (!this.isVisible && this.color.a !== 0) {
-      this.color.a *= 0.75;
-      if (this.color.a < 0.01) this.color.a = 0;
-    }
+  _updateAlpha() {
+    if (!this.target || this.target.a === this.color.a) return false;
 
+    const dA = this.target.a - this.color.a;
+    if (Math.abs(dA) < 0.01) this.color.a = this.target.a;
+    // if (this.id === 230) console.log(this.target.a, this.color.a, dA);
+    this.color.a += dA * DOT_A * 1.5;
     return true;
   }
 
