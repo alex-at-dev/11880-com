@@ -3,18 +3,21 @@ import { Color } from './types/Color';
 import { DotTarget } from './types/DotTarget';
 import { Point } from './types/Point';
 import { getColorDiff } from './util/getColorDiff';
+import { randrange } from './util/randrange';
 import { randrangeGauss } from './util/randrangeGauss';
 
-const WIDTH = 600;
+const WIDTH = 1200;
 const HEIGHT = 600;
 
 const COL_TOP: Color = { r: 206, g: 254, b: 66, a: 1 }; // dot color for y=0
 const COL_BOTTOM: Color = { r: 0, g: 194, b: 255, a: 1 }; // dot color for y=HEIGHT
 const _COL_DELTA = getColorDiff(COL_TOP, COL_BOTTOM);
 
+const NUM_DOTS = 1000;
 const DOT_R = 4; // dot radius
 const DOT_GAP = 14; // gap between dots
 const DOT_A = 0.09; // dot acceleration
+const DOT_IDLE = false; // if true dot will move while idling
 
 // image elements by source. NOTE: this variable will be changed! (not reassigned, but filled with records)
 const imageCache: Record<string, HTMLImageElement> = {};
@@ -61,7 +64,7 @@ export class DotShapeAnimation extends BaseAnimation {
     const shapeCanvas = document.createElement('canvas');
     shapeCanvas.width = WIDTH;
     shapeCanvas.height = HEIGHT;
-    const shapeCx = shapeCanvas.getContext('2d');
+    const shapeCx = shapeCanvas.getContext('2d', { willReadFrequently: true });
     if (!shapeCx) throw new Error(`Cannot get rendering context from shape-canvas.`);
 
     return { canvas, cx, canvasGradient, shapeCanvas, shapeCx };
@@ -69,21 +72,28 @@ export class DotShapeAnimation extends BaseAnimation {
 
   start() {
     this.dots = [];
+    let i = NUM_DOTS;
+    while (i--) {
+      const dot = new Dot(randrangeGauss(0, WIDTH, 2), randrangeGauss(0, HEIGHT, 2));
+      dot.color.a = 1;
+      this.dots.push(dot);
+    }
     this.mainloop();
   }
 
   async setImage(url: string) {
-    await this._drawImage(url);
-
+    await this._drawImageOnShapeCanvas(url);
     this._createPointsFromShapeCanvas();
     this._updateDotsFromPoints();
   }
 
-  async _drawImage(src: string) {
+  async _drawImageOnShapeCanvas(src: string) {
     const img = await this.loadImage(src);
 
-    const wRatio = this.shapeCanvas.width / img.width;
-    const hRatio = this.shapeCanvas.height / img.height;
+    const maxW = this.shapeCanvas.width - 10;
+    const maxH = this.shapeCanvas.height - 10;
+    const wRatio = maxW / img.width;
+    const hRatio = maxH / img.height;
     const ratio = Math.min(wRatio, hRatio);
     const centerShiftX = (this.shapeCanvas.width - img.width * ratio) / 2;
     const centerShiftY = (this.shapeCanvas.height - img.height * ratio) / 2;
@@ -198,6 +208,7 @@ class Dot {
   id: number;
   x: number;
   y: number;
+  a: number = DOT_A;
   color: Color;
   target: DotTarget | null = null;
   queue: DotTarget[];
@@ -216,8 +227,20 @@ class Dot {
    */
   update() {
     if (!this.target) {
-      if (!this.queue.length) return false;
-      this.target = this.queue.shift() as DotTarget;
+      if (!this.queue.length) {
+        // idling -> make random move
+        if (this.color.a !== 1 && DOT_IDLE) {
+          this.queue.push({
+            x: randrange(WIDTH),
+            y: randrange(HEIGHT),
+            a: this.color.a,
+          });
+          this.a = DOT_A / 4;
+        } else {
+          return false;
+        }
+      }
+      this.target = this.queue.shift() || null;
     }
 
     // update position and color
@@ -227,7 +250,10 @@ class Dot {
 
     // remove target if reached
     const didUpdate = didMove || didUpdateAlpha;
-    if (!didUpdate) this.target = null;
+    if (!didUpdate) {
+      this.target = null;
+      this.a = DOT_A;
+    }
 
     return didUpdate;
   }
@@ -243,7 +269,7 @@ class Dot {
       return false;
     }
 
-    const v = DOT_A * d;
+    const v = this.a * d;
     this.x += (dx / d) * v;
     this.y += (dy / d) * v;
     return true;
